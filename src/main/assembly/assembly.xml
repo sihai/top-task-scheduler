@@ -1,0 +1,34 @@
+<assembly>
+  <id>bin</id>
+  <formats>
+    <format>zip</format>
+  </formats>
+  <dependencySets>
+    <dependencySet>
+      <useProjectArtifact>true</useProjectArtifact>
+      <outputDirectory>lib</outputDirectory>
+    </dependencySet>
+  </dependencySets>
+  <fileSets>
+    <fileSet>
+      <outputDirectory>/</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>doc</directory>
+      <outputDirectory>/doc</outputDirectory>
+      <includes>
+        <include>README.txt</include>
+        <include>top-task-scheduler Quick Start.docx</include>
+      </includes>
+    </fileSet>
+    <fileSet>
+      <directory>scripts</directory>
+      <outputDirectory>/bin</outputDirectory>
+      <includes>
+        <include>run.sh</include>
+        <include>run.bat</include>
+		<include>target/top-task-schedule-0.0.6-SNAPSHOT.jar</include>
+      </includes>
+    </fileSet>
+  </fileSets>
+</assembly>
