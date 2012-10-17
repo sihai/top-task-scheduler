@@ -28,7 +28,7 @@ import com.ihome.top.scheduler.command.CommandConstants;
 import com.ihome.top.scheduler.command.slave.PushJobCommandHandler;
 import com.ihome.top.scheduler.config.ResourceConfig;
 import com.ihome.top.scheduler.config.SchedulerConfig;
-import com.ihome.top.scheduler.exception.JobExecutionException;
+import com.ihome.top.scheduler.job.JobCompletedReporter;
 import com.ihome.top.scheduler.job.JobConsumer;
 import com.ihome.top.scheduler.job.JobResult;
 import com.ihome.top.scheduler.job.executor.JobGroupExecutor;
@@ -49,7 +49,7 @@ import com.ihome.top.waverider.slave.DefaultSlaveNode;
  * @author <a href="mailto:sihai@taobao.com">sihai</a>
  *
  */
-public class DefaultSlaveScheduler implements com.ihome.top.scheduler.internal.SlaveScheduler {
+public class DefaultSlaveScheduler implements com.ihome.top.scheduler.internal.SlaveScheduler, JobCompletedReporter {
 
 	private static final Log logger = LogFactory.getLog(DefaultSlaveScheduler.class);
 	
@@ -254,18 +254,6 @@ public class DefaultSlaveScheduler implements com.ihome.top.scheduler.internal.S
 		}
 	}
 	
-	/*@Override
-	public void pullJob() {
-		node.startCommandProvider(SLAVE_PULL_JOB_COMMAND_PROVIDER_NAME);
-	}*/
-	
-	/*@Override
-	public void pullJobDone(List<PullJobRequest> requestList) {
-		for(PullJobRequest request : requestList) {
-			jobGroupExectuorMap.get(request.getGroup()).pullJobDone();
-		}
-	}*/
-	
 	@Override
 	public void handle(Job job) {
 		JobExecutionInfo jobExecutionInfo = new JobExecutionInfo();
@@ -273,10 +261,30 @@ public class DefaultSlaveScheduler implements com.ihome.top.scheduler.internal.S
 		jobExecutionInfo.setSlaveReceivedTime(new Date());
 		job.setJobExecutionInfo(jobExecutionInfo);
 		JobGroupExecutor executor = jobGroupExectuorMap.get(job.getKey().getGroup());
-		executor.doJob(new JobTask(job, executor.getJobConsumer()));
-		//logger.info("Submit one job for group:" + executor.getGroup());
+		executor.doJob(job, this);
+		logger.info("Submit one job for group:" + executor.getGroup());
 	}
 	
+	@Override
+	public void report(boolean success, com.ihome.top.scheduler.job.Job job, JobResult result) {
+		
+	}
+
+	@Override
+	public void report(JobExecutionInfo jobExecutionInfo) {
+		try {
+			doneJobQueue.put(jobExecutionInfo);
+		} catch (InterruptedException e) {
+			logger.error(e);
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	/**
+	 * 构建WaveriderConfig, 传递给waverider
+	 * @param config
+	 * @return
+	 */
 	private WaveriderConfig _make_waverider_config_(SchedulerConfig config) {
 		WaveriderConfig wconf = new WaveriderConfig();
 		wconf.setPort(config.getPort());
@@ -284,54 +292,10 @@ public class DefaultSlaveScheduler implements com.ihome.top.scheduler.internal.S
 		return wconf;
 	}
 
-	// Job执行线程
-	private class JobTask implements Runnable {
-		
-		private Job job;
-		private JobConsumer jobConsumer;
-		
-		public JobTask(Job job, JobConsumer jobConsumer) {
-			this.job = job;
-			this.jobConsumer = jobConsumer;
-		}
-		
-		@Override
-		public void run() {
-			JobExecutionInfo jobExecutionInfo = job.getJobExecutionInfo();
-			try {
-				jobExecutionInfo.setSlaveJobStartTime(new Date());
-				JobResult jobResult = jobConsumer.work(job);
-				jobExecutionInfo.setSlaveJobEndTime(new Date());
-				jobExecutionInfo.setIsSucceed(true);
-				jobExecutionInfo.setJobResult(jobResult);
-			} catch (RuntimeException e) {
-				//
-				jobExecutionInfo.setIsSucceed(false);
-				jobExecutionInfo.setExecutionException(new JobExecutionException(e));
-				logger.error("Execute job failed", e);
-				e.printStackTrace();
-			} catch (Exception e) {
-				//
-				jobExecutionInfo.setIsSucceed(false);
-				jobExecutionInfo.setExecutionException(new JobExecutionException(e));
-				logger.error("Execute job failed", e);
-				e.printStackTrace();
-			} finally {
-				try {
-					/*if(doneJobQueue.size() > TOP_TASK_SCHEDULER_SLAVE_DONE_JOB_QUEUE_SIZE / 2) {
-						node.startCommandProvider(SLAVE_PUSH_JOB_RESULT_COMMAND_PROVIDER_NAME);
-					}*/
-					doneJobQueue.put(jobExecutionInfo);
-				} catch (InterruptedException e) {
-					logger.error(e);
-					e.printStackTrace();
-					Thread.currentThread().interrupt();
-				}
-			}
-		}
-	}
-	
-	// 参数拉取任务请求
+	/**
+	 * 参数拉取任务请求
+	 * @return
+	 */
 	private List<PullJobRequest> _pull_job_() {
 		
 		List<PullJobRequest> requestList = new LinkedList<PullJobRequest>();
@@ -352,7 +316,10 @@ public class DefaultSlaveScheduler implements com.ihome.top.scheduler.internal.S
 		return requestList;
 	}
 	
-	// 推送任务执行结果
+	/**
+	 * 推送任务执行结果
+	 * @return
+	 */
 	private List<JobExecutionInfo> _push_job_result_() {
 		
 		List<JobExecutionInfo> doneJobList = new LinkedList<JobExecutionInfo>();

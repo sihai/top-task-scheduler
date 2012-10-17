@@ -6,7 +6,9 @@
 package com.ihome.top.scheduler.job.executor;
 
 import com.ihome.top.scheduler.config.ResourceConfig;
+import com.ihome.top.scheduler.job.JobCompletedReporter;
 import com.ihome.top.scheduler.job.JobConsumer;
+import com.ihome.top.scheduler.job.internal.Job;
 
 
 /**
@@ -20,10 +22,11 @@ import com.ihome.top.scheduler.job.JobConsumer;
 public interface JobGroupExecutor {
 	
 	/**
-	 * 执行job
-	 * @param task
+	 * 
+	 * @param job
+	 * @param reporter
 	 */
-	void doJob(Runnable task);
+	void doJob(Job job, JobCompletedReporter reporter);
 	
 	/**
 	 * 关闭执行器并释放资源

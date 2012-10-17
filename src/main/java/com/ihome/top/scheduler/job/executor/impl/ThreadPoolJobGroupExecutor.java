@@ -2,7 +2,6 @@
  * top-task-scheduler
  *  
  */
-
 package com.ihome.top.scheduler.job.executor.impl;
 
 import java.util.concurrent.BlockingQueue;
@@ -16,9 +15,11 @@ import org.apache.commons.logging.LogFactory;
 
 import com.ihome.top.scheduler.common.SchedulerThreadFactory;
 import com.ihome.top.scheduler.config.ResourceConfig;
+import com.ihome.top.scheduler.job.JobCompletedReporter;
 import com.ihome.top.scheduler.job.JobConsumer;
 import com.ihome.top.scheduler.job.executor.AbstractJobGroupExecutor;
 import com.ihome.top.scheduler.job.executor.JobGroupExecutorBusyException;
+import com.ihome.top.scheduler.job.internal.Job;
 
 /**
  * <p>
@@ -42,9 +43,9 @@ public class ThreadPoolJobGroupExecutor extends AbstractJobGroupExecutor {
 	}
 	
 	@Override
-	public void execute(Runnable task) throws JobGroupExecutorBusyException {
+	public void execute(Job job, JobCompletedReporter reporter) throws JobGroupExecutorBusyException {
 		try {
-			threadPool.execute(task);
+			threadPool.execute(new SyncJobTask(job, reporter));
 			logger.info(String.format("threadPoolJobGroupExecutor for group:%s , corePoolSize:%d, maximumPoolSize:%d, largestPoolSize:%d, activeCount:%d, maxQueueSize:%d, queueSize:%d", this.getGroup(), threadPool.getCorePoolSize(), threadPool.getMaximumPoolSize(), threadPool.getLargestPoolSize(), threadPool.getActiveCount(), this.getResourceConfig().getMaxQueueSize(), workQueue.size()));
 		} catch (RejectedExecutionException e) {
 			throw new JobGroupExecutorBusyException(e);

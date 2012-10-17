@@ -5,6 +5,7 @@
 
 package com.ihome.top.scheduler.job.executor;
 
+import java.util.Date;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -16,9 +17,14 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import com.ihome.top.scheduler.config.ResourceConfig;
-import com.ihome.top.scheduler.job.Job;
+import com.ihome.top.scheduler.exception.JobExecutionException;
+import com.ihome.top.scheduler.job.AsyncJobConsumer;
+import com.ihome.top.scheduler.job.JobCompletedReporter;
 import com.ihome.top.scheduler.job.JobConsumer;
-import com.ihome.top.scheduler.job.SlaveJobCompletedCallback;
+import com.ihome.top.scheduler.job.JobResult;
+import com.ihome.top.scheduler.job.SyncJobConsumer;
+import com.ihome.top.scheduler.job.impl.JobExecutionInfo;
+import com.ihome.top.scheduler.job.internal.Job;
 
 /**
  * <p>
@@ -34,7 +40,7 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 	
 	private String group;							// 任务分组名
 	private ResourceConfig rconfig;					// 资源配置
-	private JobConsumer jobConsumer;				// 业务任务执行器
+	protected JobConsumer jobConsumer;				// 业务任务执行器
 	private AtomicLong completed;					// 已经执行的任务数量
 	// 下面是为了提供过载保护
 	private AtomicBoolean jobAssignThreadStared;	// 任务下放线程启动了吗
@@ -83,15 +89,15 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 	 * 提交任务的模板方法, 提供通用的过载保护
 	 */
 	@Override
-	public void doJob(Runnable job/*, SlaveJobCompletedCallback slaveJobCompletedCallback*/) {
+	public void doJob(Job job, JobCompletedReporter reporter) {
 		before();
 		try {
-			execute(job/*, slaveJobCompletedCallback*/);
+			execute(job, reporter);
 		} catch(JobGroupExecutorBusyException e) {
 			// 过载
 			logger.warn(new StringBuilder("Job Executor Group(").append(group).append(") is busy."));
 			// 进入buffer区, 唤醒后台
-			bufferJob(job, null);
+			bufferJob(job, reporter);
 		}
 		after();
 	}
@@ -132,10 +138,10 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 	/**
 	 * 留给子类实现, 真正的提交任务, 可能是将Job包装成一个Runnable提交到线程池执行, 等等
 	 * @param job
-	 * @param slaveJobCompletedCallback
+	 * @param reporter
 	 * @throws JobGroupExecutorBusyException
 	 */
-	protected abstract void execute(Runnable task /*, SlaveJobCompletedCallback slaveJobCompletedCallback*/) throws JobGroupExecutorBusyException;
+	protected abstract void execute(Job job, JobCompletedReporter reporter) throws JobGroupExecutorBusyException;
 	
 	/**
 	 * 子类提供的剩余计算能力, 父类需要同时考虑isBusy和子类的availableCapacity
@@ -153,7 +159,14 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 	 */
 	protected abstract void shutdownExecuteNow();
 	
-	
+	/**
+	 * 提交异步任务
+	 * @param job
+	 * @param reporter
+	 */
+	protected void submit(Job job, JobCompletedReporter reporter) {
+		((AsyncJobConsumer)jobConsumer).work(job, reporter);
+	}
 	/**
 	 * 事前处理
 	 */
@@ -172,15 +185,16 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 	
 	/**
 	 * 
-	 * @param task
+	 * @param job
+	 * @param reporter
 	 */
-	private void bufferJob(Runnable job, SlaveJobCompletedCallback slaveJobCompletedCallback) {
+	private void bufferJob(Job job, JobCompletedReporter reporter) {
 		
 		try {
 			isBusy.set(true);				// 标识任务组执行器繁忙
 			assignLock.lock();
 			assignCondition.signalAll();	// 唤醒后台超额任务提交线程
-			jobBuffer.put(new BufferedJob(job, slaveJobCompletedCallback));
+			jobBuffer.put(new BufferedJob(job, reporter));
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			logger.error(e);
@@ -225,7 +239,7 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 							break;
 						}
 						try {
-							execute(bufferedJob.job/*, bufferedJob.slaveJobCompletedCallback*/);
+							execute(bufferedJob.job, bufferedJob.reporter);
 						} catch(JobGroupExecutorBusyException e) {
 							logger.warn(new StringBuilder("Job Executor Group()").append(group).append(" still busy, try to sleep 1 second"));
 							// 重试, 缓点
@@ -252,12 +266,49 @@ public abstract class AbstractJobGroupExecutor implements JobGroupExecutor {
 	 *
 	 */
 	private class BufferedJob {
-		public Runnable job;
-		public SlaveJobCompletedCallback slaveJobCompletedCallback;
+		public Job job;
+		public JobCompletedReporter reporter;
 		
-		public BufferedJob(Runnable job, SlaveJobCompletedCallback slaveJobCompletedCallback) {
+		public BufferedJob(Job job, JobCompletedReporter reporter) {
 			this.job = job;
-			this.slaveJobCompletedCallback = slaveJobCompletedCallback;
+			this.reporter = reporter;
+		}
+	}
+	
+	/**
+	 * 同步执行任务
+	 * @author sihai
+	 *
+	 */
+	public class SyncJobTask implements Runnable {
+		
+		private Job job;
+		private JobCompletedReporter reporter;
+		
+		public SyncJobTask(Job job, JobCompletedReporter reporter) {
+			this.job = job;
+			this.reporter = reporter;
+		}
+		
+		@Override
+		public void run() {
+			JobExecutionInfo jobExecutionInfo = job.getJobExecutionInfo();
+			try {
+				jobExecutionInfo.setSlaveJobStartTime(new Date());
+				JobResult jobResult = ((SyncJobConsumer)jobConsumer).work(job);
+				jobExecutionInfo.setSlaveJobEndTime(new Date());
+				jobExecutionInfo.setIsSucceed(true);
+				jobExecutionInfo.setJobResult(jobResult);
+			} catch (Throwable t) {
+				//
+				jobExecutionInfo.setIsSucceed(false);
+				jobExecutionInfo.setExecutionException(new JobExecutionException(t));
+				logger.error("Execute job failed", t);
+				t.printStackTrace();
+			} finally {
+				// report
+				reporter.report(jobExecutionInfo);
+			}
 		}
 	}
 }

@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.ihome.task</groupId>
 	<artifactId>top-task-scheduler</artifactId>
-	<version>0.0.7-SNAPSHOT</version>
+	<version>0.0.8-SNAPSHOT</version>
 	<packaging>jar</packaging>
 	<name>${project.artifactId} v${project.version}</name>
 	<url>https://github.com/sihai/top-task-scheduler</url>

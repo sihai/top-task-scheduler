@@ -1,6 +1,7 @@
+/**
+ * top-task-scheduler
+ */
 package com.ihome.top.scheduler.job;
-
-
 
 /**
  * <p>
@@ -15,20 +16,5 @@ package com.ihome.top.scheduler.job;
  *
  */
 public interface JobConsumer {
-	
-	/**
-	 * 消费job, 同步调用, 请保证是线程安全的
-	 * @param job
-	 * @return
-	 * @throws Exception
-	 */
-	JobResult work(Job job) throws Exception;
-	
-	/**
-	 * 消费job，异步调用，job完成后，通过callback回调通知job完成
-	 * @deprecated
-	 * @param job
-	 * @throws Exception
-	 */
-	void workNoBlocking(Job job, SlaveJobCompletedCallback callback) throws Exception;
+
 }
